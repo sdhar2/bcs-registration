@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL Database ────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: bcs_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bcs_registration
+      POSTGRES_USER: bcs_user
+      POSTGRES_PASSWORD: bcs_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - bcs_pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bcs_user -d bcs_registration"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── FastAPI Backend ────────────────────────────────────────────────────────
+  backend:
+    build: ./backend
+    container_name: bcs_backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://bcs_user:bcs_password@db:5432/bcs_registration
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app   # hot-reload in development
+
+  # ── React Frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build: ./frontend
+    container_name: bcs_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  bcs_pgdata:
