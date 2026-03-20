@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getMembers, createMember, updateMember, deleteMember } from '../api'
+import { getMembers, createMember, updateMember, deleteMember, checkDuplicate } from '../api'
 
 const EMPTY_FORM = {
   firstName: '', lastName: '', middleName: '', spouse: '', children: '',
@@ -87,9 +87,11 @@ function MemberModal({ member, onClose, onSaved }) {
   const [form, setForm] = useState(
     member ? { ...member, pledged: member.pledged ?? '', paid: member.paid ?? '' } : { ...EMPTY_FORM }
   )
-  const [fieldErrors, setFieldErrors] = useState({})
-  const [saving, setSaving]   = useState(false)
-  const [error, setError]     = useState('')
+  const [fieldErrors, setFieldErrors]         = useState({})
+  const [saving, setSaving]                   = useState(false)
+  const [error, setError]                     = useState('')
+  const [duplicates, setDuplicates]           = useState([])   // found duplicate members
+  const [pendingPayload, setPendingPayload]   = useState(null) // payload waiting for user confirmation
 
   const set = (field) => (e) => {
     let val = e.target.type === 'checkbox' ? e.target.checked : e.target.value
@@ -101,36 +103,29 @@ function MemberModal({ member, onClose, onSaved }) {
       setFieldErrors((fe) => ({ ...fe, [field]: undefined }))
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    const errs = validateFields(form)
-    if (Object.keys(errs).length > 0) {
-      setFieldErrors(errs)
-      setError('Please fix the highlighted fields before saving.')
-      return
-    }
+  const buildPayload = () => ({
+    ...form,
+    pledged:    form.pledged    === '' ? null : parseFloat(form.pledged),
+    paid:       form.paid       === '' ? null : parseFloat(form.paid),
+    middleName: form.middleName || null,
+    spouse:     form.spouse     || null,
+    children:   form.children   || null,
+    address1:   form.address1   || null,
+    address2:   form.address2   || null,
+    city:       form.city       || null,
+    state:      form.state      ? form.state.toUpperCase() : null,
+    zip:        form.zip        || null,
+    homePhone:  form.homePhone  || null,
+    cellPhone:  form.cellPhone  || null,
+    cellPhone2: form.cellPhone2 || null,
+    email:      form.email      || null,
+    status:     form.status     || null,
+  })
+
+  const doSave = async (payload) => {
     setSaving(true)
     setError('')
-    setFieldErrors({})
     try {
-      const payload = {
-        ...form,
-        pledged:    form.pledged    === '' ? null : parseFloat(form.pledged),
-        paid:       form.paid       === '' ? null : parseFloat(form.paid),
-        middleName: form.middleName || null,
-        spouse:     form.spouse     || null,
-        children:   form.children   || null,
-        address1:   form.address1   || null,
-        address2:   form.address2   || null,
-        city:       form.city       || null,
-        state:      form.state      ? form.state.toUpperCase() : null,
-        zip:        form.zip        || null,
-        homePhone:  form.homePhone  || null,
-        cellPhone:  form.cellPhone  || null,
-        cellPhone2: form.cellPhone2 || null,
-        email:      form.email      || null,
-        status:     form.status     || null,
-      }
       if (member) {
         await updateMember(member.personId, payload)
       } else {
@@ -142,6 +137,35 @@ function MemberModal({ member, onClose, onSaved }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    const errs = validateFields(form)
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs)
+      setError('Please fix the highlighted fields before saving.')
+      return
+    }
+    setFieldErrors({})
+    setError('')
+    const payload = buildPayload()
+
+    // Duplicate check only when creating a new member
+    if (!member) {
+      try {
+        const { data } = await checkDuplicate(form.firstName.trim(), form.lastName.trim())
+        if (data.duplicates.length > 0) {
+          setDuplicates(data.duplicates)
+          setPendingPayload(payload)
+          return   // pause — let the user decide
+        }
+      } catch {
+        // If the check fails, proceed with save anyway
+      }
+    }
+
+    await doSave(payload)
   }
 
   const inputClass = (field) =>
@@ -331,6 +355,51 @@ function MemberModal({ member, onClose, onSaved }) {
             </button>
           </div>
         </form>
+
+        {/* ── Duplicate Warning Dialog ── */}
+        {duplicates.length > 0 && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-2xl z-10">
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4">
+              <div className="flex items-start gap-3 mb-4">
+                <span className="text-2xl">⚠️</span>
+                <div>
+                  <h3 className="font-bold text-gray-800 text-base">Duplicate Member Found</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    The following member{duplicates.length > 1 ? 's' : ''} with the same name already exist{duplicates.length === 1 ? 's' : ''}:
+                  </p>
+                </div>
+              </div>
+              <ul className="mb-5 space-y-1">
+                {duplicates.map((d) => (
+                  <li key={d.personId} className="text-sm bg-yellow-50 border border-yellow-200 rounded px-3 py-2 text-gray-700">
+                    <strong>{d.firstName} {d.lastName}</strong>
+                    {(d.city || d.state) && (
+                      <span className="text-gray-400 ml-2">
+                        — {[d.city, d.state].filter(Boolean).join(', ')}
+                      </span>
+                    )}
+                    <span className="text-gray-400 ml-2">(ID #{d.personId})</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm text-gray-600 mb-5">Do you still want to save this new record?</p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  className="btn-secondary"
+                  onClick={() => { setDuplicates([]); setPendingPayload(null) }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={() => { setDuplicates([]); doSave(pendingPayload) }}
+                >
+                  Save Anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

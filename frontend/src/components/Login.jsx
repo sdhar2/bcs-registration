@@ -29,12 +29,11 @@ export default function Login() {
       <div className="w-full max-w-md">
         {/* Logo / Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-bcs-primary mb-4 shadow-lg border-4 border-bcs-accent">
-            <svg viewBox="0 0 80 80" width="60" height="60" xmlns="http://www.w3.org/2000/svg">
-              <text x="40" y="44" fontFamily="Georgia, serif" fontSize="28" fontWeight="bold"
-                    fill="white" textAnchor="middle" dominantBaseline="middle">BCS</text>
-            </svg>
-          </div>
+          <img
+            src="/api/assets/logo"
+            alt="BCS Logo"
+            className="w-24 h-24 rounded-full object-cover mb-4 shadow-lg border-4 border-bcs-accent"
+          />
           <h1 className="text-3xl font-bold text-bcs-primary">Bengali Cultural Society</h1>
           <p className="text-gray-500 mt-1">Event Registration Portal</p>
         </div>

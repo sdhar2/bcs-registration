@@ -1,12 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from datetime import timedelta
+from pathlib import Path
 
 from .database import engine, Base
 from .routers import members, events, contributions, receipt
 from .auth import authenticate_user, create_access_token
 from .schemas import LoginRequest, Token
 from .config import settings
+
+ASSETS_DIR = Path(__file__).parent / "assets"
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
@@ -53,3 +57,14 @@ app.include_router(receipt.router)
 @app.get("/api/health", tags=["health"])
 def health():
     return {"status": "ok", "service": "BCS Registration API"}
+
+
+# ── Public assets (no auth required) ──────────────────────────────────────────
+
+@app.get("/api/assets/logo", tags=["assets"], include_in_schema=False)
+def get_logo():
+    """Serve the BCS logo — public, no authentication required."""
+    path = ASSETS_DIR / "logo.png"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Logo not found")
+    return FileResponse(str(path), media_type="image/png")

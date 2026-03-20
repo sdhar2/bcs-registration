@@ -20,12 +20,11 @@ export default function Navbar() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-bcs-primary flex items-center justify-center shadow border-2 border-bcs-accent flex-shrink-0">
-              <svg viewBox="0 0 80 80" width="34" height="34" xmlns="http://www.w3.org/2000/svg">
-                <text x="40" y="44" fontFamily="Georgia, serif" fontSize="28" fontWeight="bold"
-                      fill="white" textAnchor="middle" dominantBaseline="middle">BCS</text>
-              </svg>
-            </div>
+            <img
+              src="/api/assets/logo"
+              alt="BCS"
+              className="w-10 h-10 rounded-full object-cover shadow border-2 border-bcs-accent flex-shrink-0"
+            />
             <div>
               <span className="text-white font-bold text-base leading-tight block">Bengali Cultural Society</span>
               <span className="text-bcs-accent text-xs">Registration Portal</span>

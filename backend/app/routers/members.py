@@ -38,6 +38,36 @@ def search_members(
     )
 
 
+@router.get("/check-duplicate", tags=["members"])
+def check_duplicate(
+    first_name: str = Query(...),
+    last_name: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    """Return any existing members whose first+last name match (case-insensitive)."""
+    matches = (
+        db.query(models.Member)
+        .filter(
+            models.Member.firstName.ilike(first_name),
+            models.Member.lastName.ilike(last_name),
+        )
+        .all()
+    )
+    return {
+        "duplicates": [
+            {
+                "personId": m.personId,
+                "firstName": m.firstName,
+                "lastName": m.lastName,
+                "city": m.city,
+                "state": m.state,
+            }
+            for m in matches
+        ]
+    }
+
+
 @router.get("/{person_id}", response_model=schemas.MemberOut)
 def get_member(
     person_id: int,

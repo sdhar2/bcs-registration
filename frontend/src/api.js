@@ -13,11 +13,13 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Redirect to login on 401
+// Redirect to login on 401 — but not for the login endpoint itself,
+// otherwise a wrong password would refresh the page before the error displays.
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    const isLoginRequest = err.config?.url === '/auth/login'
+    if (err.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem('bcs_token')
       window.location.href = '/login'
     }
@@ -35,6 +37,8 @@ export const login = (username, password) =>
 export const getMembers = () => api.get('/members/')
 export const getMember = (id) => api.get(`/members/${id}`)
 export const searchMembers = (q) => api.get('/members/search', { params: { q } })
+export const checkDuplicate = (firstName, lastName) =>
+  api.get('/members/check-duplicate', { params: { first_name: firstName, last_name: lastName } })
 export const createMember = (data) => api.post('/members/', data)
 export const updateMember = (id, data) => api.put(`/members/${id}`, data)
 export const deleteMember = (id) => api.delete(`/members/${id}`)
