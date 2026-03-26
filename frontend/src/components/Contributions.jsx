@@ -381,6 +381,8 @@ function ConfirmDelete({ info, onConfirm, onClose }) {
   )
 }
 
+const PAGE_SIZE = 100
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function Contributions() {
@@ -389,6 +391,8 @@ export default function Contributions() {
   const [loading, setLoading] = useState(true)
   const [filterEvent, setFilterEvent] = useState('')
   const [memberFilter, setMemberFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [modalContrib, setModalContrib] = useState(undefined)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [receiptTarget, setReceiptTarget] = useState(null)
@@ -396,20 +400,26 @@ export default function Contributions() {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
+      const params = { page }
+      if (filterEvent) params.event_id = filterEvent
       const [cRes, eRes] = await Promise.all([
-        getContributions(filterEvent ? { event_id: filterEvent } : {}),
+        getContributions(params),
         getEvents(),
       ])
       setContributions(cRes.data)
+      setTotalCount(Number(cRes.headers['x-total-count'] || cRes.data.length))
       setEvents(eRes.data)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [filterEvent])
+  }, [filterEvent, page])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // Reset to page 1 when event filter changes
+  useEffect(() => { setPage(1) }, [filterEvent])
 
   const handleSaved = () => {
     setModalContrib(undefined)
@@ -432,13 +442,20 @@ export default function Contributions() {
   })
 
   const totalAmount = filtered.reduce((sum, c) => sum + (Number(c.contributionAmount) || 0), 0)
+  const totalPages = filterEvent ? 1 : Math.ceil(totalCount / PAGE_SIZE)
+  const isPaginated = !filterEvent && totalCount > PAGE_SIZE
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-bcs-primary">Contributions</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{filtered.length} records · Total: <strong>${totalAmount.toFixed(2)}</strong></p>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {filterEvent
+              ? `${filtered.length} records for this event`
+              : `${totalCount.toLocaleString()} total records`}
+            {' · '}Total shown: <strong>${totalAmount.toFixed(2)}</strong>
+          </p>
         </div>
         <button className="btn-primary" onClick={() => setModalContrib(null)}>
           + Add Contribution
@@ -533,6 +550,31 @@ export default function Contributions() {
           </div>
         )}
       </div>
+
+      {/* Pagination controls — only shown when browsing all events */}
+      {isPaginated && (
+        <div className="flex items-center justify-between mt-4 px-1">
+          <span className="text-sm text-gray-500">
+            Page {page} of {totalPages} · showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount.toLocaleString()}
+          </span>
+          <div className="flex gap-2">
+            <button
+              className="btn-secondary btn-sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+            >
+              ← Previous
+            </button>
+            <button
+              className="btn-secondary btn-sm"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
 
       {modalContrib !== undefined && (
         <ContributionModal

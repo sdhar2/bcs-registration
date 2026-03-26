@@ -1,5 +1,5 @@
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select
 from typing import List, Optional
@@ -36,10 +36,12 @@ def _enrich(contribution: models.Contribution) -> schemas.ContributionOut:
     return out
 
 
+PAGE_SIZE = 100   # rows per page when browsing all contributions
+
 @router.get("/", response_model=List[schemas.ContributionOut])
 def get_contributions(
-    skip: int = 0,
-    limit: int = 200,
+    response: Response,
+    page: int = Query(1, ge=1),
     person_id: Optional[int] = Query(None),
     event_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -53,7 +55,18 @@ def get_contributions(
         query = query.filter(models.Contribution.personId == person_id)
     if event_id:
         query = query.filter(models.Contribution.eventId == event_id)
-    contributions = query.order_by(models.Contribution.dateEntered.desc()).offset(skip).limit(limit).all()
+
+    total = query.count()
+    response.headers["X-Total-Count"] = str(total)
+
+    # When filtering by a specific event or member, return all matching rows.
+    # Otherwise paginate so we never send all 8000+ rows at once.
+    if event_id or person_id:
+        contributions = query.order_by(models.Contribution.dateEntered.desc()).all()
+    else:
+        offset = (page - 1) * PAGE_SIZE
+        contributions = query.order_by(models.Contribution.dateEntered.desc()).offset(offset).limit(PAGE_SIZE).all()
+
     return [_enrich(c) for c in contributions]
 
 
