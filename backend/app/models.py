@@ -36,7 +36,7 @@ class Event(Base):
     __tablename__ = "bcs_events"
 
     eventId   = Column("eventid",   Integer,    primary_key=True, index=True, autoincrement=True)
-    eventName = Column("eventname", String(30), nullable=False)
+    eventName = Column("eventname", String(100), nullable=False)
     eventDate = Column("eventdate", Date,       nullable=False)
 
     contributions = relationship("Contribution", back_populates="event", cascade="all, delete-orphan")
