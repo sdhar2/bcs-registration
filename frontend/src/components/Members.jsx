@@ -415,22 +415,25 @@ function ConfirmDelete({ name, onConfirm, onClose }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function Members() {
-  const [members, setMembers]         = useState([])
-  const [loading, setLoading]         = useState(true)
-  const [search, setSearch]           = useState('')
-  const [modalMember, setModalMember] = useState(undefined)
+  const [members, setMembers]           = useState([])
+  const [loading, setLoading]           = useState(true)
+  const [search, setSearch]             = useState('')
+  const [statusFilter, setStatusFilter] = useState('Active')   // default: Active only
+  const [modalMember, setModalMember]   = useState(undefined)
   const [deleteTarget, setDeleteTarget] = useState(null)
 
   const fetchMembers = useCallback(async () => {
+    setLoading(true)
     try {
-      const { data } = await getMembers()
+      // Pass statusFilter to the API; empty string means "all"
+      const { data } = await getMembers(statusFilter || undefined)
       setMembers(data)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [statusFilter])
 
   useEffect(() => { fetchMembers() }, [fetchMembers])
 
@@ -457,19 +460,23 @@ export default function Members() {
            m.email?.toLowerCase().includes(s)
   })
 
+  const filterLabel = statusFilter === 'Active' ? 'active' : statusFilter === '' ? 'total' : statusFilter.toLowerCase()
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-bcs-primary">Members</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{members.length} total members</p>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {loading ? 'Loading…' : `${filtered.length} ${filterLabel} member${filtered.length !== 1 ? 's' : ''}${search ? ' matching search' : ''}`}
+          </p>
         </div>
         <button className="btn-primary" onClick={() => setModalMember(null)}>
           + Add Member
         </button>
       </div>
 
-      {/* Search */}
+      {/* Search + Status filter */}
       <div className="card p-4 mb-4 flex gap-3 items-center">
         <span className="text-gray-400">🔍</span>
         <input
@@ -483,6 +490,23 @@ export default function Members() {
             Clear
           </button>
         )}
+        <div className="h-5 w-px bg-gray-200" />
+        {/* Status filter toggle */}
+        <div className="flex gap-1">
+          {[['Active', 'Active'], ['', 'All'], ['Inactive', 'Inactive']].map(([val, label]) => (
+            <button
+              key={label}
+              onClick={() => setStatusFilter(val)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                statusFilter === val
+                  ? 'bg-bcs-primary text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Table */}

@@ -34,7 +34,7 @@ export const login = (username, password) =>
 
 // ── Members ──────────────────────────────────────────────────────────────────
 
-export const getMembers = () => api.get('/members/')
+export const getMembers = (status) => api.get('/members/', { params: status ? { status } : {} })
 export const getMember = (id) => api.get(`/members/${id}`)
 export const searchMembers = (q) => api.get('/members/search', { params: { q } })
 export const checkDuplicate = (firstName, lastName) =>

@@ -10,12 +10,14 @@ router = APIRouter(prefix="/api/members", tags=["members"])
 
 @router.get("/", response_model=List[schemas.MemberOut])
 def get_members(
-    skip: int = 0,
-    limit: int = 200,
+    status: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user),
 ):
-    return db.query(models.Member).order_by(models.Member.lastName, models.Member.firstName).offset(skip).limit(limit).all()
+    q = db.query(models.Member)
+    if status:
+        q = q.filter(models.Member.status == status)
+    return q.order_by(models.Member.lastName, models.Member.firstName).all()
 
 
 @router.get("/search", response_model=List[schemas.MemberSearch])

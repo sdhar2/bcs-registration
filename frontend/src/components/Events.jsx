@@ -49,7 +49,7 @@ function EventModal({ event, onClose, onSaved }) {
               className="input-field"
               value={form.eventName}
               onChange={set('eventName')}
-              maxLength={30}
+              maxLength={100}
               required
               placeholder="e.g. Durga Puja 2024"
             />
