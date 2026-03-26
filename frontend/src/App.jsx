@@ -4,6 +4,7 @@ import Navbar from './components/Navbar'
 import Members from './components/Members'
 import Events from './components/Events'
 import Contributions from './components/Contributions'
+import ImportTransactions from './components/ImportTransactions'
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem('bcs_token')
@@ -45,6 +46,14 @@ export default function App() {
           element={
             <PrivateRoute>
               <Layout><Contributions /></Layout>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/import"
+          element={
+            <PrivateRoute>
+              <Layout><ImportTransactions /></Layout>
             </PrivateRoute>
           }
         />

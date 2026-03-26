@@ -5,7 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .database import engine, Base
-from .routers import members, events, contributions, receipt
+from .routers import members, events, contributions, receipt, import_transactions
 from .auth import authenticate_user, create_access_token
 from .schemas import LoginRequest, Token
 from .config import settings
@@ -52,6 +52,7 @@ app.include_router(members.router)
 app.include_router(events.router)
 app.include_router(contributions.router)
 app.include_router(receipt.router)
+app.include_router(import_transactions.router)
 
 
 @app.get("/api/health", tags=["health"])

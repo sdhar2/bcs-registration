@@ -63,4 +63,20 @@ export const deleteContribution = (id) => api.delete(`/contributions/${id}`)
 export const getReceiptPreview = (id) => api.get(`/receipt/preview/${id}`)
 export const sendReceipt = (id) => api.post(`/receipt/send/${id}`)
 
+// ── Import ────────────────────────────────────────────────────────────────────
+
+export const parsePayPal = (file) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.post('/import/parse/paypal', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
+
+export const parseStripe = (file) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.post('/import/parse/stripe', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
+
+export const saveImport = (rows) => api.post('/import/save', { rows })
+
 export default api

@@ -5,7 +5,7 @@ const EMPTY_FORM = {
   firstName: '', lastName: '', middleName: '', spouse: '', children: '',
   address1: '', address2: '', city: '', state: '', zip: '',
   homePhone: '', cellPhone: '', cellPhone2: '',
-  pledged: '', paid: '', email: '', status: 'Active', lifeMember: false,
+  email: '', status: 'Active', lifeMember: false,
 }
 
 const STATUS_OPTIONS = ['Active', 'Inactive', 'Pending']
@@ -85,7 +85,7 @@ function FieldError({ msg }) {
 // ── Member Modal ──────────────────────────────────────────────────────────────
 function MemberModal({ member, onClose, onSaved }) {
   const [form, setForm] = useState(
-    member ? { ...member, pledged: member.pledged ?? '', paid: member.paid ?? '' } : { ...EMPTY_FORM }
+    member ? { ...member } : { ...EMPTY_FORM }
   )
   const [fieldErrors, setFieldErrors]         = useState({})
   const [saving, setSaving]                   = useState(false)
@@ -105,8 +105,6 @@ function MemberModal({ member, onClose, onSaved }) {
 
   const buildPayload = () => ({
     ...form,
-    pledged:    form.pledged    === '' ? null : parseFloat(form.pledged),
-    paid:       form.paid       === '' ? null : parseFloat(form.paid),
     middleName: form.middleName || null,
     spouse:     form.spouse     || null,
     children:   form.children   || null,
@@ -316,23 +314,15 @@ function MemberModal({ member, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* ── Membership & Financials ── */}
+          {/* ── Membership ── */}
           <div>
-            <h3 className="section-header">Membership &amp; Financials</h3>
-            <div className="grid grid-cols-3 gap-3">
+            <h3 className="section-header">Membership</h3>
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
                 <select className="input-field" value={form.status} onChange={set('status')}>
                   {STATUS_OPTIONS.map((s) => <option key={s}>{s}</option>)}
                 </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Pledged ($)</label>
-                <input className="input-field" type="number" step="0.01" value={form.pledged} onChange={set('pledged')} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Paid ($)</label>
-                <input className="input-field" type="number" step="0.01" value={form.paid} onChange={set('paid')} />
               </div>
             </div>
             <div className="mt-3">
@@ -514,8 +504,6 @@ export default function Members() {
                   <th className="table-th">City/State</th>
                   <th className="table-th">Status</th>
                   <th className="table-th">Life Member</th>
-                  <th className="table-th">Pledged</th>
-                  <th className="table-th">Paid</th>
                   <th className="table-th">Actions</th>
                 </tr>
               </thead>
@@ -539,8 +527,6 @@ export default function Members() {
                       </span>
                     </td>
                     <td className="table-td text-center">{m.lifeMember ? '✅' : '—'}</td>
-                    <td className="table-td">{m.pledged != null ? `$${Number(m.pledged).toFixed(2)}` : '—'}</td>
-                    <td className="table-td">{m.paid    != null ? `$${Number(m.paid).toFixed(2)}`    : '—'}</td>
                     <td className="table-td">
                       <div className="flex gap-2">
                         <button className="btn-secondary btn-sm" onClick={() => setModalMember(m)}>Edit</button>
