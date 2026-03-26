@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getEvents, searchMembers, parsePayPal, parseStripe, saveImport } from '../api'
+import { getEvents, searchMembers, parsePayPal, parseStripe, saveImport, createMember } from '../api'
 
 // ── Member search dropdown ────────────────────────────────────────────────────
 function MemberPicker({ value, onChange, placeholder = 'Search member…' }) {
@@ -112,6 +112,147 @@ function DropZone({ onFile, label }) {
   )
 }
 
+// ── New Member Modal (pre-filled from PayPal/Stripe row) ─────────────────────
+function NewMemberModal({ row, onClose, onCreated }) {
+  // Split "First Last" from the PayPal Name field
+  const splitName = (full) => {
+    const parts = (full || '').trim().split(/\s+/).filter(Boolean)
+    if (parts.length === 0) return { firstName: '', lastName: '' }
+    if (parts.length === 1) return { firstName: parts[0], lastName: '' }
+    return { firstName: parts[0], lastName: parts.slice(1).join(' ') }
+  }
+
+  const { firstName: initFirst, lastName: initLast } = splitName(row.name)
+
+  const [form, setForm] = useState({
+    firstName:  initFirst,
+    lastName:   initLast,
+    email:      row.email      || '',
+    address1:   row.address1   || '',
+    address2:   row.address2   || '',
+    city:       row.city       || '',
+    state:      row.state      || '',
+    zip:        row.zip        || '',
+    cellPhone:  row.phone      || '',
+    status:     'Active',
+    lifeMember: false,
+  })
+  const [saving,  setSaving]  = useState(false)
+  const [error,   setError]   = useState('')
+
+  const set = (field) => (e) => {
+    let val = e.target.value
+    if (field === 'state') val = val.toUpperCase().slice(0, 2)
+    setForm((f) => ({ ...f, [field]: val }))
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!form.firstName.trim() || !form.lastName.trim()) {
+      setError('First Name and Last Name are required.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const payload = {
+        ...form,
+        firstName:  form.firstName.trim(),
+        lastName:   form.lastName.trim(),
+        email:      form.email     || null,
+        address1:   form.address1  || null,
+        address2:   form.address2  || null,
+        city:       form.city      || null,
+        state:      form.state     ? form.state.toUpperCase() : null,
+        zip:        form.zip       || null,
+        cellPhone:  form.cellPhone || null,
+      }
+      const { data } = await createMember(payload)
+      onCreated({ personId: data.personId, name: `${data.firstName} ${data.lastName}` })
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to create member.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-bcs-primary">Add New Member</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Pre-filled from payment data — edit as needed</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">{error}</div>
+          )}
+
+          {/* Name */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">First Name <span className="text-red-500">*</span></label>
+              <input className="input-field" value={form.firstName} onChange={set('firstName')} required />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Last Name <span className="text-red-500">*</span></label>
+              <input className="input-field" value={form.lastName} onChange={set('lastName')} required />
+            </div>
+          </div>
+
+          {/* Email */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+            <input className="input-field" type="email" value={form.email} onChange={set('email')} />
+          </div>
+
+          {/* Address */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Address Line 1</label>
+            <input className="input-field" value={form.address1} onChange={set('address1')} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Address Line 2</label>
+            <input className="input-field" value={form.address2} onChange={set('address2')} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-1">
+              <label className="block text-xs font-medium text-gray-500 mb-1">City</label>
+              <input className="input-field" value={form.city} onChange={set('city')} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">State</label>
+              <input className="input-field" value={form.state} onChange={set('state')} maxLength={2} placeholder="NJ" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Zip</label>
+              <input className="input-field" value={form.zip} onChange={set('zip')} maxLength={10} />
+            </div>
+          </div>
+
+          {/* Phone */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Cell Phone</label>
+            <input className="input-field" value={form.cellPhone} onChange={set('cellPhone')} maxLength={10} placeholder="10 digits" />
+          </div>
+
+          <div className="flex gap-3 justify-end pt-2 border-t border-gray-100">
+            <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : 'Create Member & Assign'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ImportTransactions() {
   const [activeTab, setActiveTab]       = useState('paypal')
@@ -124,6 +265,7 @@ export default function ImportTransactions() {
   const [parseError, setParseError]     = useState('')
   const [saveResult, setSaveResult]     = useState(null)   // {saved, receiptNumbers}
   const [fileName, setFileName]         = useState('')
+  const [newMemberRow, setNewMemberRow] = useState(null)   // row whose "+ New Member" was clicked
 
   useEffect(() => {
     getEvents().then(({ data }) => setEvents(data)).catch(console.error)
@@ -231,8 +373,23 @@ export default function ImportTransactions() {
     }
   }
 
+  // Called when NewMemberModal successfully creates a member
+  const handleMemberCreated = (member) => {
+    setRowMember(newMemberRow.rowIndex, member)
+    setNewMemberRow(null)
+  }
+
   return (
     <div>
+      {/* New Member Modal */}
+      {newMemberRow && (
+        <NewMemberModal
+          row={newMemberRow}
+          onClose={() => setNewMemberRow(null)}
+          onCreated={handleMemberCreated}
+        />
+      )}
+
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-bcs-primary">Import Transactions</h1>
@@ -400,11 +557,23 @@ export default function ImportTransactions() {
                         {isIgnored ? (
                           <span className="text-xs text-gray-400 italic">ignored</span>
                         ) : (
-                          <MemberPicker
-                            value={assigned}
-                            onChange={(m) => setRowMember(r.rowIndex, m)}
-                            placeholder={r.matchedMemberName || 'Search member…'}
-                          />
+                          <div className="space-y-1">
+                            <MemberPicker
+                              value={assigned}
+                              onChange={(m) => setRowMember(r.rowIndex, m)}
+                              placeholder={r.matchedMemberName || 'Search member…'}
+                            />
+                            {/* Show "＋ New Member" only for unmatched rows */}
+                            {!assigned && r.matchConfidence === 'none' && (
+                              <button
+                                type="button"
+                                className="text-xs text-bcs-primary hover:text-bcs-dark font-medium flex items-center gap-1"
+                                onClick={() => setNewMemberRow(r)}
+                              >
+                                ＋ New Member
+                              </button>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td className="table-td text-center">

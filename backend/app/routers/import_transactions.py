@@ -40,12 +40,13 @@ class ImportPreviewRow(BaseModel):
     matchedPersonId: Optional[int] = None
     matchedMemberName: Optional[str] = None
     matchConfidence: str = "none"   # "email" | "name" | "address" | "none"
-    # Address info (populated for unmatched PayPal records)
+    # Address / contact info (populated for unmatched PayPal records)
     address1: Optional[str] = None
     address2: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     zip: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class ImportSaveRow(BaseModel):
@@ -203,17 +204,18 @@ async def parse_paypal(
         if tx_type not in INCLUDE_TYPES:
             continue
 
-        name       = row.get("Name", "").strip()
-        email      = row.get("From Email Address", "").strip()
-        amount     = _parse_amount(row.get("Net", "0"))
-        tx_date    = _parse_date_paypal(row.get("Date", ""))
-        tx_id      = row.get("Transaction ID", "").strip()
+        name        = row.get("Name", "").strip()
+        email       = row.get("From Email Address", "").strip()
+        amount      = _parse_amount(row.get("Net", "0"))
+        tx_date     = _parse_date_paypal(row.get("Date", ""))
+        tx_id       = row.get("Transaction ID", "").strip()
         description = row.get("Subject", "").strip() or row.get("Item Title", "").strip()
-        address1   = row.get("Address Line 1", "").strip()
-        address2   = row.get("Address Line 2/District/Neighborhood", "").strip()
-        city       = row.get("Town/City", "").strip()
-        state      = row.get("State/Province/Region/County/Territory/Prefecture/Republic", "").strip()
-        zip_code   = row.get("Zip/Postal Code", "").strip()
+        address1    = row.get("Address Line 1", "").strip()
+        address2    = row.get("Address Line 2/District/Neighborhood", "").strip()
+        city        = row.get("Town/City", "").strip()
+        state       = row.get("State/Province/Region/County/Territory/Prefecture/Republic", "").strip()
+        zip_code    = row.get("Zip/Postal Code", "").strip()
+        phone       = row.get("Contact Phone Number", "").strip()
 
         member, confidence = _try_match(db, email, name, address1, state, zip_code)
 
@@ -234,6 +236,7 @@ async def parse_paypal(
             city=city or None,
             state=state or None,
             zip=zip_code or None,
+            phone=phone or None,
         ))
         row_idx += 1
 
