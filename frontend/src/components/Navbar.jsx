@@ -5,6 +5,7 @@ const navItems = [
   { to: '/events', label: 'Events', icon: '📅' },
   { to: '/contributions', label: 'Contributions', icon: '💰' },
   { to: '/import', label: 'Import', icon: '📥' },
+  { to: '/reports', label: 'Reports', icon: '📊' },
 ]
 
 export default function Navbar() {

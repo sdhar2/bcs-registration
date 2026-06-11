@@ -63,6 +63,12 @@ export const deleteContribution = (id) => api.delete(`/contributions/${id}`)
 export const getReceiptPreview = (id) => api.get(`/receipt/preview/${id}`)
 export const sendReceipt = (id) => api.post(`/receipt/send/${id}`)
 
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+export const getMembershipYears = () => api.get('/reports/membership-years')
+export const getUnpaidMembershipReport = (year) =>
+  api.get('/reports/unpaid-membership', { params: { year } })
+
 // ── Import ────────────────────────────────────────────────────────────────────
 
 export const parsePayPal = (file) => {
