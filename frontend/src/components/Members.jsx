@@ -455,9 +455,18 @@ export default function Members() {
   const filtered = members.filter((m) => {
     if (!search) return true
     const s = search.toLowerCase()
+    // Phone matching: compare digits only, so "(609) 555-1234", "609-555" and
+    // "6095551234" all match regardless of how the number was entered.
+    const searchDigits = search.replace(/\D/g, '')
+    const phoneMatch =
+      searchDigits.length >= 3 &&
+      [m.cellPhone, m.cellPhone2, m.homePhone].some(
+        (p) => p && p.replace(/\D/g, '').includes(searchDigits)
+      )
     return m.firstName?.toLowerCase().includes(s) ||
            m.lastName?.toLowerCase().includes(s)  ||
-           m.email?.toLowerCase().includes(s)
+           m.email?.toLowerCase().includes(s)     ||
+           phoneMatch
   })
 
   const filterLabel = statusFilter === 'Active' ? 'active' : statusFilter === '' ? 'total' : statusFilter.toLowerCase()
@@ -481,7 +490,7 @@ export default function Members() {
         <span className="text-gray-400">🔍</span>
         <input
           className="flex-1 outline-none text-sm text-gray-700 bg-transparent"
-          placeholder="Search by name or email…"
+          placeholder="Search by name, email, or phone…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
