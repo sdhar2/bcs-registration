@@ -69,6 +69,16 @@ export const getMembershipYears = () => api.get('/reports/membership-years')
 export const getUnpaidMembershipReport = (year) =>
   api.get('/reports/unpaid-membership', { params: { year } })
 
+// scope: 'all' | 'active' | 'life'
+export const getMemberDirectory = (scope) =>
+  api.get('/reports/member-directory', { params: { scope } })
+
+export const downloadMemberDirectoryExcel = (scope) =>
+  api.get('/reports/member-directory.xlsx', {
+    params: { scope },
+    responseType: 'blob',
+  })
+
 // ── Import ────────────────────────────────────────────────────────────────────
 
 export const parsePayPal = (file) => {

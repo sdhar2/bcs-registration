@@ -1,5 +1,23 @@
 import { useState, useEffect } from 'react'
-import { getMembershipYears, getUnpaidMembershipReport } from '../api'
+import {
+  getMembershipYears,
+  getUnpaidMembershipReport,
+  getMemberDirectory,
+  downloadMemberDirectoryExcel,
+} from '../api'
+
+// ── Download helper ───────────────────────────────────────────────────────────
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
@@ -28,17 +46,12 @@ function downloadCsv(report) {
     CSV_COLUMNS.map(([key]) => csvEscape(m[key])).join(',')
   )
   const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `unpaid_membership_${report.year}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
+  saveBlob(blob, `unpaid_membership_${report.year}.csv`)
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Outstanding Annual Membership ─────────────────────────────────────────────
 
-export default function Reports() {
+function UnpaidMembershipReport() {
   const [years, setYears] = useState([])
   const [year, setYear] = useState('')
   const [report, setReport] = useState(null)
@@ -71,9 +84,7 @@ export default function Reports() {
   }
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-bcs-primary mb-4">Reports</h1>
-
+    <>
       {/* Report selector */}
       <div className="card p-4 mb-4">
         <h2 className="font-semibold text-gray-800 mb-1">Outstanding Annual Membership</h2>
@@ -107,7 +118,7 @@ export default function Reports() {
 
       {/* Results */}
       {report && (
-        <div className="card overflow-hidden">
+        <div className="card overflow-hidden mb-8">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <span className="font-semibold text-gray-800">
               {report.count} member{report.count === 1 ? '' : 's'} with unpaid {report.year} membership
@@ -153,6 +164,160 @@ export default function Reports() {
           )}
         </div>
       )}
+    </>
+  )
+}
+
+// ── Member Directory ──────────────────────────────────────────────────────────
+
+const SCOPE_OPTIONS = [
+  ['all', 'All Members'],
+  ['active', 'All Active Members'],
+  ['life', 'All Life Members'],
+]
+
+function filenameFromResponse(res, fallback) {
+  const cd = res.headers?.['content-disposition'] || ''
+  const match = /filename="?([^";]+)"?/.exec(cd)
+  return match ? match[1] : fallback
+}
+
+function formatAddress(m) {
+  return [m.address1, m.address2, [m.city, m.state].filter(Boolean).join(', '), m.zip]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function MemberDirectoryReport() {
+  const [scope, setScope] = useState('all')
+  const [report, setReport] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [error, setError] = useState('')
+
+  const runReport = async () => {
+    setLoading(true)
+    setError('')
+    setReport(null)
+    try {
+      const res = await getMemberDirectory(scope)
+      setReport(res.data)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to generate report')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const downloadExcel = async () => {
+    setDownloading(true)
+    setError('')
+    try {
+      const res = await downloadMemberDirectoryExcel(scope)
+      saveBlob(res.data, filenameFromResponse(res, `member_directory_${scope}.xlsx`))
+    } catch (err) {
+      setError('Failed to download the Excel file')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <>
+      {/* Report selector */}
+      <div className="card p-4 mb-4">
+        <h2 className="font-semibold text-gray-800 mb-1">Member Directory</h2>
+        <p className="text-sm text-gray-500 mb-3">
+          Members with spouse, children, mailing address, phone numbers and email
+          address. Choose which members to include, then run the report or download
+          it directly as an Excel spreadsheet.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-sm font-medium text-gray-700">Include:</label>
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-bcs-primary"
+          >
+            {SCOPE_OPTIONS.map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          <button className="btn-primary" onClick={runReport} disabled={loading}>
+            {loading ? 'Running…' : 'Run Report'}
+          </button>
+          <button className="btn-secondary" onClick={downloadExcel} disabled={downloading}>
+            {downloading ? 'Preparing…' : '⬇ Download Excel'}
+          </button>
+        </div>
+        {error && <p className="text-red-600 text-sm mt-3">{error}</p>}
+      </div>
+
+      {/* Results */}
+      {report && (
+        <div className="card overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <span className="font-semibold text-gray-800">
+              {report.count} {report.scopeLabel.toLowerCase()}
+            </span>
+            <span className="text-xs text-gray-500">
+              The Excel export includes every directory column
+            </span>
+          </div>
+
+          {report.members.length === 0 ? (
+            <p className="p-6 text-gray-500 text-sm">No members match this selection.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-bcs-light border-b border-gray-100">
+                  <tr>
+                    <th className="table-th">#</th>
+                    <th className="table-th">Name</th>
+                    <th className="table-th">Spouse</th>
+                    <th className="table-th">Children</th>
+                    <th className="table-th">Address</th>
+                    <th className="table-th">Phone</th>
+                    <th className="table-th">Email</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.members.map((m, i) => (
+                    <tr key={m.personId} className={i % 2 === 1 ? 'bg-gray-50' : ''}>
+                      <td className="table-td text-gray-400">{i + 1}</td>
+                      <td className="table-td font-medium">
+                        {m.lastName}, {m.firstName}
+                        {m.lifeMember && (
+                          <span className="ml-2 text-xs font-normal text-bcs-primary">(Life)</span>
+                        )}
+                      </td>
+                      <td className="table-td">{m.spouse || '—'}</td>
+                      <td className="table-td">{m.children || '—'}</td>
+                      <td className="table-td">{formatAddress(m) || '—'}</td>
+                      <td className="table-td">
+                        {[m.cellPhone, m.homePhone].filter(Boolean).join(' / ') || '—'}
+                      </td>
+                      <td className="table-td">{m.email || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function Reports() {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold text-bcs-primary mb-4">Reports</h1>
+      <UnpaidMembershipReport />
+      <MemberDirectoryReport />
     </div>
   )
 }
