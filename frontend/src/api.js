@@ -53,7 +53,12 @@ export const deleteEvent = (id) => api.delete(`/events/${id}`)
 
 // ── Contributions ─────────────────────────────────────────────────────────────
 
-export const getContributions = (params) => api.get('/contributions/', { params })
+// params.event_ids may be an array — axios repeats it as ?event_ids=1&event_ids=2
+export const getContributions = (params) =>
+  api.get('/contributions/', {
+    params,
+    paramsSerializer: { indexes: null },
+  })
 export const createContribution = (data) => api.post('/contributions/', data)
 export const updateContribution = (id, data) => api.put(`/contributions/${id}`, data)
 export const deleteContribution = (id) => api.delete(`/contributions/${id}`)

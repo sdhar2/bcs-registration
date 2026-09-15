@@ -612,6 +612,165 @@ function BulkReceiptDialog({ ids, onClose, onFinished }) {
   )
 }
 
+// ── Multi-Event Filter ────────────────────────────────────────────────────────
+
+function EventFilter({ events, selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const boxRef = useRef(null)
+
+  // Close when clicking anywhere outside the panel
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  // Every whitespace-separated term must appear somewhere, so "durga 2026"
+  // matches "2026 Durga Puja — Saturday Dinner" regardless of word order.
+  const matches = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    if (!needle) return events
+    const terms = needle.split(/\s+/)
+    return events.filter((ev) => {
+      const hay = `${ev.eventName || ''} ${ev.eventDate || ''}`.toLowerCase()
+      return terms.every((t) => hay.includes(t))
+    })
+  }, [events, q])
+
+  const toggle = (id) => {
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    onChange(next)
+  }
+
+  const addAllMatching = () => {
+    const next = new Set(selected)
+    matches.forEach((ev) => next.add(ev.eventId))
+    onChange(next)
+  }
+
+  const removeAllMatching = () => {
+    const next = new Set(selected)
+    matches.forEach((ev) => next.delete(ev.eventId))
+    onChange(next)
+  }
+
+  const allMatchingSelected =
+    matches.length > 0 && matches.every((ev) => selected.has(ev.eventId))
+
+  const selectedEventObjs = events.filter((ev) => selected.has(ev.eventId))
+
+  const label =
+    selected.size === 0
+      ? 'All Events'
+      : selected.size === 1
+        ? selectedEventObjs[0]?.eventName || '1 event'
+        : `${selected.size} events selected`
+
+  return (
+    <div className="relative" ref={boxRef}>
+      <button
+        type="button"
+        className="input-field text-left flex items-center justify-between gap-2"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className={selected.size === 0 ? 'text-gray-400' : 'text-gray-800 truncate'}>
+          {label}
+        </span>
+        <span className="text-gray-400 text-xs shrink-0">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1">
+          <div className="p-2 border-b border-gray-100">
+            <input
+              className="input-field text-sm"
+              placeholder="Search events — e.g. durga 2026"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div className="flex items-center justify-between px-3 py-1.5 bg-bcs-light text-xs border-b border-gray-100">
+            <span className="text-gray-500">
+              {matches.length} event{matches.length === 1 ? '' : 's'}
+              {q.trim() && ' matching'}
+            </span>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                className="text-bcs-primary hover:underline disabled:opacity-30 disabled:no-underline"
+                onClick={addAllMatching}
+                disabled={matches.length === 0 || allMatchingSelected}
+              >
+                Select all {q.trim() ? 'matching' : ''}
+              </button>
+              {selected.size > 0 && (
+                <button
+                  type="button"
+                  className="text-gray-500 hover:underline"
+                  onClick={q.trim() ? removeAllMatching : () => onChange(new Set())}
+                >
+                  {q.trim() ? 'Unselect matching' : 'Clear'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto">
+            {matches.length === 0 && (
+              <div className="p-3 text-sm text-gray-400">No events match “{q}”.</div>
+            )}
+            {matches.map((ev) => (
+              <label
+                key={ev.eventId}
+                className="flex items-center gap-2 px-3 py-2 hover:bg-bcs-light cursor-pointer border-b border-gray-50 last:border-0"
+              >
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-bcs-primary cursor-pointer shrink-0"
+                  checked={selected.has(ev.eventId)}
+                  onChange={() => toggle(ev.eventId)}
+                />
+                <span className="text-sm text-gray-800 flex-1 truncate">{ev.eventName}</span>
+                <span className="text-xs text-gray-400 shrink-0">{ev.eventDate}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Selected-event chips */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {selectedEventObjs.map((ev) => (
+            <span
+              key={ev.eventId}
+              className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-100 text-xs rounded-full pl-3 pr-1 py-1"
+            >
+              {ev.eventName}
+              <button
+                type="button"
+                className="hover:bg-blue-200 rounded-full w-4 h-4 leading-none text-blue-500"
+                onClick={() => toggle(ev.eventId)}
+                aria-label={`Remove ${ev.eventName} filter`}
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Confirm Delete ────────────────────────────────────────────────────────────
 
 function ConfirmDelete({ info, onConfirm, onClose }) {
@@ -637,7 +796,7 @@ export default function Contributions() {
   const [contributions, setContributions] = useState([])
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filterEvent, setFilterEvent] = useState('')
+  const [selectedEvents, setSelectedEvents] = useState(() => new Set())
   const [memberFilter, setMemberFilter] = useState('')
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
@@ -647,11 +806,19 @@ export default function Contributions() {
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [bulkIds, setBulkIds] = useState(null)                  // snapshot passed to the bulk dialog
 
+  // A stable primitive so the fetch/reset effects below don't re-fire on every
+  // render just because `selectedEvents` is a new Set object.
+  const eventKey = useMemo(
+    () => Array.from(selectedEvents).sort((a, b) => a - b).join(','),
+    [selectedEvents]
+  )
+  const hasEventFilter = selectedEvents.size > 0
+
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
       const params = { page }
-      if (filterEvent) params.event_id = filterEvent
+      if (eventKey) params.event_ids = eventKey.split(',').map(Number)
       const [cRes, eRes] = await Promise.all([
         getContributions(params),
         getEvents(),
@@ -664,16 +831,16 @@ export default function Contributions() {
     } finally {
       setLoading(false)
     }
-  }, [filterEvent, page])
+  }, [eventKey, page])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  // Reset to page 1 when event filter changes
-  useEffect(() => { setPage(1) }, [filterEvent])
+  // Reset to page 1 when the event filter changes
+  useEffect(() => { setPage(1) }, [eventKey])
 
   // Clearing the selection when the visible set changes keeps the checkbox
   // state from silently referring to rows that are no longer on screen.
-  useEffect(() => { setSelectedIds(new Set()) }, [filterEvent, page])
+  useEffect(() => { setSelectedIds(new Set()) }, [eventKey, page])
 
   const handleSaved = (saved, isNew) => {
     setModalContrib(undefined)
@@ -721,8 +888,25 @@ export default function Contributions() {
 
   const selectedCount = selectedIds.size
   const totalAmount = filtered.reduce((sum, c) => sum + (Number(c.contributionAmount) || 0), 0)
-  const totalPages = filterEvent ? 1 : Math.ceil(totalCount / PAGE_SIZE)
-  const isPaginated = !filterEvent && totalCount > PAGE_SIZE
+  const totalPages = hasEventFilter ? 1 : Math.ceil(totalCount / PAGE_SIZE)
+  const isPaginated = !hasEventFilter && totalCount > PAGE_SIZE
+
+  // Per-event subtotals over the rows actually on screen, ordered to match the
+  // event dropdown (newest first) rather than by whatever order rows arrived in.
+  const perEvent = useMemo(() => {
+    if (!hasEventFilter) return []
+    const acc = new Map()
+    filtered.forEach((c) => {
+      const key = c.eventId
+      const row = acc.get(key) || { eventId: key, eventName: c.eventName, count: 0, amount: 0 }
+      row.count += 1
+      row.amount += Number(c.contributionAmount) || 0
+      acc.set(key, row)
+    })
+    return events
+      .filter((ev) => acc.has(ev.eventId))
+      .map((ev) => ({ ...acc.get(ev.eventId), eventName: ev.eventName }))
+  }, [filtered, events, hasEventFilter])
 
   return (
     <div>
@@ -730,8 +914,8 @@ export default function Contributions() {
         <div>
           <h1 className="text-2xl font-bold text-bcs-primary">Contributions</h1>
           <p className="text-gray-500 text-sm mt-0.5">
-            {filterEvent
-              ? `${filtered.length} records for this event`
+            {hasEventFilter
+              ? `${filtered.length.toLocaleString()} records across ${selectedEvents.size} event${selectedEvents.size === 1 ? '' : 's'}`
               : `${totalCount.toLocaleString()} total records`}
             {' · '}Total shown: <strong>{money(totalAmount)}</strong>
           </p>
@@ -774,16 +958,11 @@ export default function Contributions() {
       <div className="card p-4 mb-4 grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Filter by Event</label>
-          <select
-            className="input-field"
-            value={filterEvent}
-            onChange={(e) => setFilterEvent(e.target.value)}
-          >
-            <option value="">All Events</option>
-            {events.map((ev) => (
-              <option key={ev.eventId} value={ev.eventId}>{ev.eventName}</option>
-            ))}
-          </select>
+          <EventFilter
+            events={events}
+            selected={selectedEvents}
+            onChange={setSelectedEvents}
+          />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Filter by Member Name</label>
@@ -795,6 +974,28 @@ export default function Contributions() {
           />
         </div>
       </div>
+
+      {/* Per-event breakdown — only meaningful once events are picked */}
+      {perEvent.length > 1 && (
+        <div className="card p-4 mb-4">
+          <p className="text-xs font-medium text-gray-500 mb-2">Breakdown by event</p>
+          <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+            {perEvent.map((ev) => (
+              <div key={ev.eventId} className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="text-gray-700 truncate">{ev.eventName}</span>
+                <span className="shrink-0">
+                  <span className="text-gray-400 text-xs mr-2">{ev.count} rec.</span>
+                  <span className="font-semibold text-green-700">{money(ev.amount)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-baseline justify-between gap-3 text-sm border-t border-gray-100 mt-2 pt-2">
+            <span className="font-semibold text-gray-700">Combined</span>
+            <span className="font-bold text-green-700">{money(totalAmount)}</span>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div className="card overflow-hidden">

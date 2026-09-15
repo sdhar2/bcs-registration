@@ -43,7 +43,12 @@ def get_contributions(
     response: Response,
     page: int = Query(1, ge=1),
     person_id: Optional[int] = Query(None),
-    event_id: Optional[int] = Query(None),
+    event_id: Optional[int] = Query(
+        None, description="Single event filter (legacy; prefer repeated event_ids)."
+    ),
+    event_ids: Optional[List[int]] = Query(
+        None, description="Repeat to filter across several events, e.g. ?event_ids=3&event_ids=7"
+    ),
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user),
 ):
@@ -53,15 +58,19 @@ def get_contributions(
     )
     if person_id:
         query = query.filter(models.Contribution.personId == person_id)
-    if event_id:
-        query = query.filter(models.Contribution.eventId == event_id)
+
+    # event_id is kept so older callers keep working; both may be supplied,
+    # in which case they are unioned.
+    wanted_events = list(dict.fromkeys((event_ids or []) + ([event_id] if event_id else [])))
+    if wanted_events:
+        query = query.filter(models.Contribution.eventId.in_(wanted_events))
 
     total = query.count()
     response.headers["X-Total-Count"] = str(total)
 
-    # When filtering by a specific event or member, return all matching rows.
+    # When filtering by specific events or a member, return all matching rows.
     # Otherwise paginate so we never send all 8000+ rows at once.
-    if event_id or person_id:
+    if wanted_events or person_id:
         contributions = query.order_by(models.Contribution.dateEntered.desc()).all()
     else:
         offset = (page - 1) * PAGE_SIZE
