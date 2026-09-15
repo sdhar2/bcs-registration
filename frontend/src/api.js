@@ -63,6 +63,13 @@ export const deleteContribution = (id) => api.delete(`/contributions/${id}`)
 export const getReceiptPreview = (id) => api.get(`/receipt/preview/${id}`)
 export const sendReceipt = (id) => api.post(`/receipt/send/${id}`)
 
+// Bulk receipts — ids is an array of contributionId
+export const getBulkReceiptPreview = (ids) =>
+  api.post('/receipt/bulk-preview', { contributionIds: ids })
+
+export const sendBulkReceipts = (ids) =>
+  api.post('/receipt/bulk-send', { contributionIds: ids })
+
 // ── Reports ───────────────────────────────────────────────────────────────────
 
 export const getMembershipYears = () => api.get('/reports/membership-years')

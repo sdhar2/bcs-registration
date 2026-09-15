@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   getContributions, createContribution, updateContribution, deleteContribution,
   searchMembers, getEvents, getReceiptPreview, sendReceipt,
+  getBulkReceiptPreview, sendBulkReceipts,
 } from '../api'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -10,6 +11,12 @@ const EMPTY_FORM = {
   personId: '', eventId: '', dateEntered: today(),
   contributionAmount: '', notes: '', receiptNumber: '',
 }
+
+// Must match MAX_BULK in backend/app/routers/receipt.py
+const MAX_BULK = 50
+const PAGE_SIZE = 100
+
+const money = (v) => `$${Number(v || 0).toFixed(2)}`
 
 // ── Member Search Input ───────────────────────────────────────────────────────
 
@@ -120,11 +127,14 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
         receiptNumber: form.receiptNumber || null,
       }
       if (contribution) {
-        await updateContribution(contribution.contributionId, payload)
+        const { data } = await updateContribution(contribution.contributionId, payload)
+        onSaved(data, false)
       } else {
-        await createContribution(payload)
+        const { data } = await createContribution(payload)
+        // Hand the saved record back so the caller can chain into the
+        // receipt screen — the contribution is already persisted at this point.
+        onSaved(data, true)
       }
-      onSaved()
     } catch (err) {
       setError(err.response?.data?.detail || 'Save failed.')
     } finally {
@@ -230,10 +240,16 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
             />
           </div>
 
+          {!contribution && (
+            <p className="text-xs text-gray-400 border-t border-gray-100 pt-3">
+              After saving you'll see the member's email addresses and can send the receipt.
+            </p>
+          )}
+
           <div className="flex gap-3 pt-2 justify-end">
             <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : contribution ? 'Save Changes' : 'Add Contribution'}
+              {saving ? 'Saving…' : contribution ? 'Save Changes' : 'Save & Continue →'}
             </button>
           </div>
         </form>
@@ -242,10 +258,10 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
   )
 }
 
-// ── Send Receipt Dialog ───────────────────────────────────────────────────────
+// ── Send Receipt Screen (single) ──────────────────────────────────────────────
 
-function SendReceiptDialog({ contribution, onClose }) {
-  const [preview, setPreview]   = useState(null)   // { emails, receiptNumber, memberName }
+function SendReceiptDialog({ contribution, justCreated = false, onClose }) {
+  const [preview, setPreview]   = useState(null)   // { emails, receiptNumber, memberName, … }
   const [loadErr, setLoadErr]   = useState('')
   const [sending, setSending]   = useState(false)
   const [sent, setSent]         = useState(false)
@@ -275,20 +291,34 @@ function SendReceiptDialog({ contribution, onClose }) {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-bcs-primary">Send Donation Receipt</h2>
+          <h2 className="text-lg font-bold text-bcs-primary">
+            {justCreated ? 'Contribution Saved — Send Receipt' : 'Send Donation Receipt'}
+          </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
         </div>
+
+        {justCreated && !sent && (
+          <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-2 rounded text-sm mb-4">
+            ✓ Contribution saved{preview?.receiptNumber ? ` as receipt ${preview.receiptNumber}` : ''}.
+          </div>
+        )}
 
         {/* Loading state */}
         {!preview && !loadErr && (
           <div className="py-8 text-center text-gray-400 text-sm">Loading receipt info…</div>
         )}
 
-        {/* Error loading preview */}
+        {/* Error loading preview — e.g. member has no email on file */}
         {loadErr && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded text-sm mb-4">
-            {loadErr}
-          </div>
+          <>
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded text-sm mb-4">
+              {loadErr}
+              {justCreated && ' The contribution itself was saved.'}
+            </div>
+            <div className="flex justify-end">
+              <button className="btn-secondary" onClick={onClose}>Close</button>
+            </div>
+          </>
         )}
 
         {/* Success state */}
@@ -298,7 +328,7 @@ function SendReceiptDialog({ contribution, onClose }) {
               ✓ Receipt emailed successfully to <strong>{preview?.emails?.join(', ')}</strong>
             </div>
             <div className="flex justify-end">
-              <button className="btn-primary" onClick={onClose}>Close</button>
+              <button className="btn-primary" onClick={onClose}>Done</button>
             </div>
           </div>
         )}
@@ -319,12 +349,12 @@ function SendReceiptDialog({ contribution, onClose }) {
                 <div className="flex justify-between">
                   <span className="text-gray-500">Amount</span>
                   <span className="font-semibold text-green-700">
-                    ${Number(contribution.contributionAmount || 0).toFixed(2)}
+                    {money(preview.amount ?? contribution.contributionAmount)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Event</span>
-                  <span className="text-gray-700">{contribution.eventName}</span>
+                  <span className="text-gray-700">{preview.eventName || contribution.eventName}</span>
                 </div>
               </div>
 
@@ -350,10 +380,230 @@ function SendReceiptDialog({ contribution, onClose }) {
             )}
 
             <div className="flex gap-3 justify-end">
-              <button className="btn-secondary" onClick={onClose} disabled={sending}>Cancel</button>
+              <button className="btn-secondary" onClick={onClose} disabled={sending}>
+                {justCreated ? 'Skip for now' : 'Cancel'}
+              </button>
               <button className="btn-primary" onClick={handleSend} disabled={sending}>
                 {sending ? 'Sending…' : '📧 Send Receipt'}
               </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Bulk Receipt Screen ───────────────────────────────────────────────────────
+
+const STATUS_STYLE = {
+  sent:    'bg-green-50 text-green-700 border-green-200',
+  skipped: 'bg-amber-50 text-amber-700 border-amber-200',
+  failed:  'bg-red-50 text-red-700 border-red-200',
+}
+
+function BulkReceiptDialog({ ids, onClose, onFinished }) {
+  const [preview, setPreview] = useState(null)   // BulkPreviewResponse
+  const [loadErr, setLoadErr] = useState('')
+  const [sending, setSending] = useState(false)
+  const [results, setResults] = useState(null)   // BulkSendResponse
+  const [sendErr, setSendErr] = useState('')
+
+  const tooMany = ids.length > MAX_BULK
+
+  useEffect(() => {
+    if (tooMany) return
+    getBulkReceiptPreview(ids)
+      .then(({ data }) => setPreview(data))
+      .catch((err) => setLoadErr(err.response?.data?.detail || 'Could not load receipt info.'))
+    // ids is a stable snapshot taken when the dialog opened
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleSend = async () => {
+    setSending(true)
+    setSendErr('')
+    try {
+      const { data } = await sendBulkReceipts(ids)
+      setResults(data)
+      onFinished?.()
+    } catch (err) {
+      setSendErr(err.response?.data?.detail || 'Bulk send failed.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !sending && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[88vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-bcs-primary">
+            {results ? 'Bulk Receipts Sent' : `Send ${ids.length} Receipt${ids.length === 1 ? '' : 's'}`}
+          </h2>
+          <button
+            onClick={onClose}
+            disabled={sending}
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none disabled:opacity-30"
+          >
+            &times;
+          </button>
+        </div>
+
+        {tooMany && (
+          <>
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded text-sm mb-4">
+              You selected {ids.length} contributions. Receipts go out one email at a time,
+              so send at most <strong>{MAX_BULK}</strong> per batch. Deselect some and try again.
+            </div>
+            <div className="flex justify-end">
+              <button className="btn-secondary" onClick={onClose}>Close</button>
+            </div>
+          </>
+        )}
+
+        {!tooMany && !preview && !loadErr && !results && (
+          <div className="py-10 text-center text-gray-400 text-sm">Loading recipients…</div>
+        )}
+
+        {loadErr && (
+          <>
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded text-sm mb-4">{loadErr}</div>
+            <div className="flex justify-end"><button className="btn-secondary" onClick={onClose}>Close</button></div>
+          </>
+        )}
+
+        {/* ── Confirmation: who gets what ── */}
+        {preview && !results && (
+          <>
+            <div className="flex gap-3 mb-3 text-sm">
+              <span className="bg-green-50 text-green-700 border border-green-200 rounded-full px-3 py-1">
+                {preview.sendableCount} will be sent
+              </span>
+              {preview.skippedCount > 0 && (
+                <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-3 py-1">
+                  {preview.skippedCount} will be skipped
+                </span>
+              )}
+            </div>
+
+            <div className="overflow-y-auto border border-gray-100 rounded-lg flex-1 min-h-0">
+              <table className="w-full text-sm">
+                <thead className="bg-bcs-light sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Member</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Receipt #</th>
+                    <th className="text-right px-3 py-2 font-medium text-gray-600">Amount</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Sending to</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {preview.items.map((it) => (
+                    <tr key={it.contributionId} className={it.sendable ? '' : 'bg-amber-50/40'}>
+                      <td className="px-3 py-2 font-medium text-gray-800">
+                        {it.memberName || `Contribution #${it.contributionId}`}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs text-gray-600">{it.receiptNumber || '—'}</td>
+                      <td className="px-3 py-2 text-right text-green-700 font-medium">{money(it.amount)}</td>
+                      <td className="px-3 py-2">
+                        {it.sendable ? (
+                          <div className="flex flex-wrap gap-1">
+                            {it.emails.map((e) => (
+                              <span key={e} className="bg-blue-50 text-blue-700 border border-blue-100 text-xs rounded-full px-2 py-0.5">
+                                {e}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-amber-700 text-xs">⚠ Skipped — {it.reason}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {sendErr && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded text-sm mt-3">{sendErr}</div>
+            )}
+
+            {sending && (
+              <div className="mt-3">
+                <div className="h-1.5 w-full bg-gray-100 rounded overflow-hidden">
+                  <div className="h-full w-1/3 bg-bcs-primary animate-pulse rounded" />
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Sending {preview.sendableCount} email{preview.sendableCount === 1 ? '' : 's'} — this can take a minute. Please keep this window open.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end pt-4">
+              <button className="btn-secondary" onClick={onClose} disabled={sending}>Cancel</button>
+              <button
+                className="btn-primary"
+                onClick={handleSend}
+                disabled={sending || preview.sendableCount === 0}
+              >
+                {sending ? 'Sending…' : `📧 Send ${preview.sendableCount} Receipt${preview.sendableCount === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ── Results ── */}
+        {results && (
+          <>
+            <div className="flex gap-3 mb-3 text-sm flex-wrap">
+              <span className="bg-green-50 text-green-700 border border-green-200 rounded-full px-3 py-1">
+                ✓ {results.sentCount} sent
+              </span>
+              {results.skippedCount > 0 && (
+                <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-3 py-1">
+                  ⚠ {results.skippedCount} skipped
+                </span>
+              )}
+              {results.failedCount > 0 && (
+                <span className="bg-red-50 text-red-700 border border-red-200 rounded-full px-3 py-1">
+                  ✕ {results.failedCount} failed
+                </span>
+              )}
+            </div>
+
+            <div className="overflow-y-auto border border-gray-100 rounded-lg flex-1 min-h-0">
+              <table className="w-full text-sm">
+                <thead className="bg-bcs-light sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Member</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Receipt #</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Status</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Detail</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {results.items.map((it) => (
+                    <tr key={it.contributionId}>
+                      <td className="px-3 py-2 font-medium text-gray-800">
+                        {it.memberName || `Contribution #${it.contributionId}`}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs text-gray-600">{it.receiptNumber || '—'}</td>
+                      <td className="px-3 py-2">
+                        <span className={`text-xs rounded-full px-2 py-0.5 border ${STATUS_STYLE[it.status]}`}>
+                          {it.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-500">
+                        {it.status === 'sent' ? it.emails.join(', ') : (it.detail || '—')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end pt-4">
+              <button className="btn-primary" onClick={onClose}>Done</button>
             </div>
           </>
         )}
@@ -370,7 +620,7 @@ function ConfirmDelete({ info, onConfirm, onClose }) {
       <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
         <h3 className="text-lg font-bold text-gray-800 mb-2">Delete Contribution?</h3>
         <p className="text-gray-500 text-sm mb-6">
-          Delete the ${Number(info.contributionAmount || 0).toFixed(2)} contribution from <strong>{info.memberName}</strong> for <strong>{info.eventName}</strong>?
+          Delete the {money(info.contributionAmount)} contribution from <strong>{info.memberName}</strong> for <strong>{info.eventName}</strong>?
         </p>
         <div className="flex gap-3 justify-end">
           <button className="btn-secondary" onClick={onClose}>Cancel</button>
@@ -380,8 +630,6 @@ function ConfirmDelete({ info, onConfirm, onClose }) {
     </div>
   )
 }
-
-const PAGE_SIZE = 100
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
@@ -395,7 +643,9 @@ export default function Contributions() {
   const [totalCount, setTotalCount] = useState(0)
   const [modalContrib, setModalContrib] = useState(undefined)
   const [deleteTarget, setDeleteTarget] = useState(null)
-  const [receiptTarget, setReceiptTarget] = useState(null)
+  const [receiptTarget, setReceiptTarget] = useState(null)      // { contribution, justCreated }
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [bulkIds, setBulkIds] = useState(null)                  // snapshot passed to the bulk dialog
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -421,14 +671,26 @@ export default function Contributions() {
   // Reset to page 1 when event filter changes
   useEffect(() => { setPage(1) }, [filterEvent])
 
-  const handleSaved = () => {
+  // Clearing the selection when the visible set changes keeps the checkbox
+  // state from silently referring to rows that are no longer on screen.
+  useEffect(() => { setSelectedIds(new Set()) }, [filterEvent, page])
+
+  const handleSaved = (saved, isNew) => {
     setModalContrib(undefined)
     fetchAll()
+    if (isNew && saved?.contributionId) {
+      setReceiptTarget({ contribution: saved, justCreated: true })
+    }
   }
 
   const handleDelete = async () => {
     try {
       await deleteContribution(deleteTarget.contributionId)
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(deleteTarget.contributionId)
+        return next
+      })
       setDeleteTarget(null)
       fetchAll()
     } catch (e) {
@@ -436,11 +698,28 @@ export default function Contributions() {
     }
   }
 
-  const filtered = contributions.filter((c) => {
+  const filtered = useMemo(() => contributions.filter((c) => {
     if (!memberFilter) return true
     return c.memberName?.toLowerCase().includes(memberFilter.toLowerCase())
+  }), [contributions, memberFilter])
+
+  const toggleOne = (id) => setSelectedIds((prev) => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
   })
 
+  const visibleIds = filtered.map((c) => c.contributionId)
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
+
+  const toggleAllVisible = () => setSelectedIds((prev) => {
+    const next = new Set(prev)
+    if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id))
+    else visibleIds.forEach((id) => next.add(id))
+    return next
+  })
+
+  const selectedCount = selectedIds.size
   const totalAmount = filtered.reduce((sum, c) => sum + (Number(c.contributionAmount) || 0), 0)
   const totalPages = filterEvent ? 1 : Math.ceil(totalCount / PAGE_SIZE)
   const isPaginated = !filterEvent && totalCount > PAGE_SIZE
@@ -454,13 +733,42 @@ export default function Contributions() {
             {filterEvent
               ? `${filtered.length} records for this event`
               : `${totalCount.toLocaleString()} total records`}
-            {' · '}Total shown: <strong>${totalAmount.toFixed(2)}</strong>
+            {' · '}Total shown: <strong>{money(totalAmount)}</strong>
           </p>
         </div>
-        <button className="btn-primary" onClick={() => setModalContrib(null)}>
-          + Add Contribution
-        </button>
+        <div className="flex gap-2">
+          <button
+            className={`px-4 py-2 rounded-lg font-medium text-sm border transition-colors ${
+              selectedCount > 0
+                ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                : 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
+            }`}
+            disabled={selectedCount === 0}
+            onClick={() => setBulkIds(Array.from(selectedIds))}
+            title={selectedCount === 0 ? 'Select contributions to send receipts' : `Send ${selectedCount} receipts`}
+          >
+            📧 Send Bulk Receipts{selectedCount > 0 ? ` (${selectedCount})` : ''}
+          </button>
+          <button className="btn-primary" onClick={() => setModalContrib(null)}>
+            + Add Contribution
+          </button>
+        </div>
       </div>
+
+      {/* Selection banner */}
+      {selectedCount > 0 && (
+        <div className="mb-4 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm">
+          <span className="text-blue-800">
+            <strong>{selectedCount}</strong> contribution{selectedCount === 1 ? '' : 's'} selected
+            {selectedCount > MAX_BULK && (
+              <span className="text-amber-700"> — max {MAX_BULK} per batch</span>
+            )}
+          </span>
+          <button className="text-blue-700 hover:underline" onClick={() => setSelectedIds(new Set())}>
+            Clear selection
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card p-4 mb-4 grid grid-cols-2 gap-3">
@@ -499,6 +807,15 @@ export default function Contributions() {
             <table className="w-full">
               <thead className="bg-bcs-light border-b border-gray-100">
                 <tr>
+                  <th className="table-th w-10">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-bcs-primary cursor-pointer align-middle"
+                      checked={allVisibleSelected}
+                      onChange={toggleAllVisible}
+                      title="Select all shown"
+                    />
+                  </th>
                   <th className="table-th">Date</th>
                   <th className="table-th">Member</th>
                   <th className="table-th">Event</th>
@@ -509,40 +826,55 @@ export default function Contributions() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((c) => (
-                  <tr key={c.contributionId} className="hover:bg-bcs-light transition-colors">
-                    <td className="table-td text-gray-500">{c.dateEntered}</td>
-                    <td className="table-td font-medium">{c.memberName || `ID #${c.personId}`}</td>
-                    <td className="table-td">
-                      <span className="text-bcs-secondary font-medium">{c.eventName || `ID #${c.eventId}`}</span>
-                    </td>
-                    <td className="table-td">
-                      <span className="font-semibold text-green-700">
-                        {c.contributionAmount != null ? `$${Number(c.contributionAmount).toFixed(2)}` : '—'}
-                      </span>
-                    </td>
-                    <td className="table-td font-mono text-xs">{c.receiptNumber || '—'}</td>
-                    <td className="table-td max-w-xs truncate text-gray-500">{c.notes || '—'}</td>
-                    <td className="table-td">
-                      <div className="flex gap-1 flex-wrap">
-                        <button className="btn-secondary btn-sm" onClick={() => setModalContrib(c)}>Edit</button>
-                        <button
-                          className="btn-sm px-2 py-1 text-xs rounded font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
-                          onClick={() => setReceiptTarget(c)}
-                          title="Send receipt by email"
-                        >
-                          📧 Receipt
-                        </button>
-                        <button className="btn-danger btn-sm" onClick={() => setDeleteTarget(c)}>Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map((c) => {
+                  const checked = selectedIds.has(c.contributionId)
+                  return (
+                    <tr
+                      key={c.contributionId}
+                      className={`transition-colors ${checked ? 'bg-blue-50/60' : 'hover:bg-bcs-light'}`}
+                    >
+                      <td className="table-td">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-bcs-primary cursor-pointer align-middle"
+                          checked={checked}
+                          onChange={() => toggleOne(c.contributionId)}
+                          aria-label={`Select receipt for ${c.memberName || c.personId}`}
+                        />
+                      </td>
+                      <td className="table-td text-gray-500">{c.dateEntered}</td>
+                      <td className="table-td font-medium">{c.memberName || `ID #${c.personId}`}</td>
+                      <td className="table-td">
+                        <span className="text-bcs-secondary font-medium">{c.eventName || `ID #${c.eventId}`}</span>
+                      </td>
+                      <td className="table-td">
+                        <span className="font-semibold text-green-700">
+                          {c.contributionAmount != null ? money(c.contributionAmount) : '—'}
+                        </span>
+                      </td>
+                      <td className="table-td font-mono text-xs">{c.receiptNumber || '—'}</td>
+                      <td className="table-td max-w-xs truncate text-gray-500">{c.notes || '—'}</td>
+                      <td className="table-td">
+                        <div className="flex gap-1 flex-wrap">
+                          <button className="btn-secondary btn-sm" onClick={() => setModalContrib(c)}>Edit</button>
+                          <button
+                            className="btn-sm px-2 py-1 text-xs rounded font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+                            onClick={() => setReceiptTarget({ contribution: c, justCreated: false })}
+                            title="Send receipt by email"
+                          >
+                            📧 Receipt
+                          </button>
+                          <button className="btn-danger btn-sm" onClick={() => setDeleteTarget(c)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
               <tfoot className="bg-bcs-light border-t-2 border-bcs-accent">
                 <tr>
-                  <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-600 text-right">Total:</td>
-                  <td className="px-4 py-3 text-sm font-bold text-green-700">${totalAmount.toFixed(2)}</td>
+                  <td colSpan={4} className="px-4 py-3 text-sm font-semibold text-gray-600 text-right">Total:</td>
+                  <td className="px-4 py-3 text-sm font-bold text-green-700">{money(totalAmount)}</td>
                   <td colSpan={3}></td>
                 </tr>
               </tfoot>
@@ -593,8 +925,16 @@ export default function Contributions() {
       )}
       {receiptTarget && (
         <SendReceiptDialog
-          contribution={receiptTarget}
+          contribution={receiptTarget.contribution}
+          justCreated={receiptTarget.justCreated}
           onClose={() => setReceiptTarget(null)}
+        />
+      )}
+      {bulkIds && (
+        <BulkReceiptDialog
+          ids={bulkIds}
+          onClose={() => setBulkIds(null)}
+          onFinished={() => setSelectedIds(new Set())}
         />
       )}
     </div>
