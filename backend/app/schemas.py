@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import List, Optional
 from datetime import date
 from decimal import Decimal
 
@@ -60,6 +60,25 @@ class MemberSearch(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class MembershipEventRef(BaseModel):
+    eventId: int
+    eventName: str
+
+
+class MembershipStatus(BaseModel):
+    """Answer to "does this member still owe dues for the year?" """
+    personId: int
+    memberName: str
+    year: int
+    lifeMember: bool
+    # False when no "<year> Membership" event has been created yet, in which
+    # case nothing can be due.
+    membershipEventExists: bool
+    paid: bool
+    dues: bool
+    events: List[MembershipEventRef] = []
 
 
 # ── Events ───────────────────────────────────────────────────────────────────

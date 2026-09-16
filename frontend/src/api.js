@@ -39,6 +39,9 @@ export const getMember = (id) => api.get(`/members/${id}`)
 export const searchMembers = (q) => api.get('/members/search', { params: { q } })
 export const checkDuplicate = (firstName, lastName) =>
   api.get('/members/check-duplicate', { params: { first_name: firstName, last_name: lastName } })
+// year is optional — the backend defaults to the current calendar year
+export const getMembershipStatus = (id, year) =>
+  api.get(`/members/${id}/membership-status`, { params: year ? { year } : {} })
 export const createMember = (data) => api.post('/members/', data)
 export const updateMember = (id, data) => api.put(`/members/${id}`, data)
 export const deleteMember = (id) => api.delete(`/members/${id}`)

@@ -36,3 +36,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# ── Member data / generated reports (contain real names, addresses, emails) ──
+*.accdb
+*.xlsx
+bcs_outstanding_membership_*.csv
+bcs_outstanding_membership_*.html

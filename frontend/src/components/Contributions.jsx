@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   getContributions, createContribution, updateContribution, deleteContribution,
   searchMembers, getEvents, getReceiptPreview, sendReceipt,
-  getBulkReceiptPreview, sendBulkReceipts,
+  getBulkReceiptPreview, sendBulkReceipts, getMembershipStatus,
 } from '../api'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -104,12 +104,44 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // Membership dues check — runs when a member is picked on a new contribution.
+  // Purely informational: it never blocks the save.
+  const [membership, setMembership] = useState(null)
+  const [membershipLoading, setMembershipLoading] = useState(false)
+
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }))
 
-  const handleMemberSelect = (m) => {
+  const handleMemberSelect = async (m) => {
     setMemberSearch(`${m.lastName}, ${m.firstName}`)
     setForm((f) => ({ ...f, personId: m.personId }))
+    setMembership(null)
+    setMembershipLoading(true)
+    try {
+      const { data } = await getMembershipStatus(m.personId)
+      setMembership(data)
+    } catch {
+      // A failed check must never stand in the way of recording a contribution.
+      setMembership(null)
+    } finally {
+      setMembershipLoading(false)
+    }
   }
+
+  // Clearing or retyping the member name invalidates the previous check.
+  const handleMemberSearchChange = (q) => {
+    setMemberSearch(q)
+    if (membership) setMembership(null)
+    setForm((f) => (f.personId ? { ...f, personId: '' } : f))
+  }
+
+  // Once the membership event itself is chosen, the dues are being collected
+  // right here, so the warning has served its purpose.
+  const payingMembershipNow = useMemo(
+    () =>
+      !!membership &&
+      membership.events.some((ev) => String(ev.eventId) === String(form.eventId)),
+    [membership, form.eventId]
+  )
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -163,12 +195,46 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
             ) : (
               <MemberSearch
                 value={memberSearch}
-                onChange={setMemberSearch}
+                onChange={handleMemberSearchChange}
                 onSelect={handleMemberSelect}
               />
             )}
             {form.personId && (
               <p className="text-xs text-green-600 mt-1">✓ Member ID #{form.personId} selected</p>
+            )}
+
+            {/* Membership dues check */}
+            {membershipLoading && (
+              <p className="text-xs text-gray-400 mt-1">Checking membership…</p>
+            )}
+
+            {membership?.lifeMember && (
+              <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full bg-green-100 text-green-800 text-xs font-medium">
+                ★ Life Member
+              </span>
+            )}
+
+            {membership?.dues && !payingMembershipNow && (
+              <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg px-3 py-2 text-sm">
+                <span aria-hidden="true">⚠️</span>
+                <span>
+                  <strong>{membership.year} membership is due</strong> for{' '}
+                  {membership.memberName}. You can continue entering this
+                  contribution — this is a reminder only.
+                </span>
+              </div>
+            )}
+
+            {membership?.dues && payingMembershipNow && (
+              <p className="text-xs text-green-700 mt-2">
+                ✓ This entry records {membership.memberName}'s {membership.year} membership.
+              </p>
+            )}
+
+            {membership && !membership.lifeMember && !membership.dues && membership.paid && (
+              <p className="text-xs text-green-700 mt-2">
+                ✓ {membership.year} membership already paid.
+              </p>
             )}
           </div>
 

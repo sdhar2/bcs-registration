@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from io import BytesIO
 
@@ -8,23 +7,9 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..database import get_db
 from ..auth import get_current_user
+from ..membership import YEAR_RE, membership_events as _membership_events
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
-
-YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
-
-
-def _membership_events(db: Session, year: int):
-    """All events whose name contains 'membership' and the given year,
-    e.g. '2026 Membership' or 'Membership 2026'."""
-    return (
-        db.query(models.Event)
-        .filter(
-            models.Event.eventName.ilike("%membership%"),
-            models.Event.eventName.ilike(f"%{year}%"),
-        )
-        .all()
-    )
 
 
 @router.get("/membership-years")

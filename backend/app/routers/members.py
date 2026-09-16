@@ -4,6 +4,7 @@ from typing import List, Optional
 from .. import models, schemas
 from ..database import get_db
 from ..auth import get_current_user
+from ..membership import membership_status
 
 router = APIRouter(prefix="/api/members", tags=["members"])
 
@@ -38,6 +39,25 @@ def search_members(
         .limit(50)
         .all()
     )
+
+
+@router.get("/{person_id}/membership-status", response_model=schemas.MembershipStatus)
+def get_membership_status(
+    person_id: int,
+    year: Optional[int] = Query(
+        None, ge=1900, le=2100,
+        description="Defaults to the current calendar year.",
+    ),
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    """Whether this member still owes membership dues for the year.
+
+    Life members are never due.  Read-only -- does not modify any data."""
+    member = db.query(models.Member).filter(models.Member.personId == person_id).first()
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return membership_status(db, member, year)
 
 
 @router.get("/check-duplicate", tags=["members"])
