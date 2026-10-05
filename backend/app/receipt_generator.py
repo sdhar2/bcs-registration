@@ -207,8 +207,10 @@ def generate_receipt_pdf(
     c.setFont('Times-BoldItalic', 11)
     c.drawCentredString(sig_cx, sig_label_y, 'Received By')
 
-    sig_img_w = 1.80 * inch
-    sig_img_h = 0.70 * inch
+    # The signature art is trimmed to the ink and has a transparent background,
+    # so this box is filled almost exactly (preserveAspectRatio does the rest).
+    sig_img_w = 2.30 * inch
+    sig_img_h = 0.96 * inch
     sig_img_x = sig_cx - sig_img_w / 2
     sig_img_y = sig_label_y - sig_img_h - 0.05 * inch
 

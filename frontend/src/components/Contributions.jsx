@@ -3,6 +3,7 @@ import {
   getContributions, createContribution, updateContribution, deleteContribution,
   searchMembers, getEvents, getReceiptPreview, sendReceipt,
   getBulkReceiptPreview, sendBulkReceipts, getMembershipStatus,
+  createMember, checkDuplicate,
 } from '../api'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -20,7 +21,28 @@ const money = (v) => `$${Number(v || 0).toFixed(2)}`
 
 // ── Member Search Input ───────────────────────────────────────────────────────
 
-function MemberSearch({ value, onChange, onSelect }) {
+// Mirrors the validation the Members page applies to these same fields.
+const RE_ALPHA_PARENS = /^[A-Za-z\s()]*$/
+const RE_ALPHA_ONLY   = /^[A-Za-z\s]*$/
+const RE_PHONE        = /^\d{10}$/
+const RE_EMAIL_SINGLE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// Split whatever the user typed into first/last name.  Accepts the directory
+// style "Bagchi, Sudarshan" as well as plain "Sudarshan Bagchi"; a single word
+// is treated as a last name, which is how most members are looked up.
+function splitTypedName(raw) {
+  const q = (raw || '').trim().replace(/\s+/g, ' ')
+  if (!q) return { firstName: '', lastName: '' }
+  if (q.includes(',')) {
+    const [last, first = ''] = q.split(',')
+    return { firstName: first.trim(), lastName: last.trim() }
+  }
+  const parts = q.split(' ')
+  if (parts.length === 1) return { firstName: '', lastName: parts[0] }
+  return { firstName: parts.slice(0, -1).join(' '), lastName: parts[parts.length - 1] }
+}
+
+function MemberSearch({ value, onChange, onSelect, onAddNew }) {
   const [results, setResults] = useState([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -77,11 +99,211 @@ function MemberSearch({ value, onChange, onSelect }) {
               <div className="text-xs text-gray-500">{m.email || m.cellPhone || `ID #${m.personId}`}</div>
             </div>
           ))}
+          {!loading && onAddNew && value.trim().length > 0 && (
+            <div
+              className="p-3 text-sm text-bcs-primary font-medium hover:bg-bcs-light cursor-pointer border-t border-gray-100 sticky bottom-0 bg-white"
+              onMouseDown={() => { setOpen(false); onAddNew(value) }}
+            >
+              + Add “{value.trim()}” as a new member
+            </div>
+          )}
         </div>
       )}
     </div>
   )
 }
+
+// ── Quick Add Member ──────────────────────────────────────────────────────────
+// A trimmed-down version of the Members form, so a member missing from the
+// directory can be created without leaving the contribution you are entering.
+// Only the essentials are asked for here — address, children and the rest are
+// filled in later on the Members page.
+
+function QuickAddMemberModal({ typedName, onClose, onCreated }) {
+  const [form, setForm] = useState(() => ({
+    ...splitTypedName(typedName),
+    email: '', cellPhone: '', status: 'Active',
+  }))
+  const [fieldErrors, setFieldErrors] = useState({})
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [duplicates, setDuplicates] = useState([])
+
+  const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }))
+
+  const validate = () => {
+    const errs = {}
+    if (!form.firstName.trim()) errs.firstName = 'Required'
+    else if (!RE_ALPHA_PARENS.test(form.firstName)) errs.firstName = 'Only letters, spaces, ( ) allowed'
+
+    if (!form.lastName.trim()) errs.lastName = 'Required'
+    else if (!RE_ALPHA_ONLY.test(form.lastName)) errs.lastName = 'Only letters and spaces allowed'
+
+    if (form.cellPhone && !RE_PHONE.test(form.cellPhone)) errs.cellPhone = 'Must be exactly 10 digits'
+
+    if (form.email) {
+      const bad = form.email.split(',').map((e) => e.trim()).filter(Boolean)
+        .filter((e) => !RE_EMAIL_SINGLE.test(e))
+      if (bad.length) errs.email = `Invalid address${bad.length > 1 ? 'es' : ''}: ${bad.join(', ')}`
+    }
+    return errs
+  }
+
+  const payload = () => ({
+    firstName: form.firstName.trim(),
+    lastName:  form.lastName.trim(),
+    email:     form.email.trim() || null,
+    cellPhone: form.cellPhone.trim() || null,
+    status:    form.status,
+    lifeMember: false,
+  })
+
+  const doSave = async (body) => {
+    setSaving(true)
+    setError('')
+    try {
+      const { data } = await createMember(body)
+      onCreated(data, true)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not create the member.')
+      setDuplicates([])
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    const errs = validate()
+    if (Object.keys(errs).length) {
+      setFieldErrors(errs)
+      setError('Please fix the highlighted fields.')
+      return
+    }
+    setFieldErrors({})
+    setError('')
+
+    // Same duplicate guard the Members page uses — the search that sent you
+    // here matches on name fragments, so a differently-spelled existing record
+    // can still slip past it.
+    try {
+      const { data } = await checkDuplicate(form.firstName.trim(), form.lastName.trim())
+      if (data.duplicates.length > 0) { setDuplicates(data.duplicates); return }
+    } catch {
+      // A failing check should not block the save.
+    }
+    await doSave(payload())
+  }
+
+  const cls = (f) => `input-field ${fieldErrors[f] ? 'border-red-400 focus:ring-red-300' : ''}`
+  const Err = ({ f }) => fieldErrors[f]
+    ? <p className="text-red-500 text-xs mt-1">{fieldErrors[f]}</p> : null
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-bold text-bcs-primary">Add New Member</h2>
+          <button type="button" onClick={onClose}
+                  className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          Just the essentials — you can fill in address and other details later on the Members page.
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded text-sm">{error}</div>}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">First Name *</label>
+              <input className={cls('firstName')} value={form.firstName} onChange={set('firstName')} autoFocus />
+              <Err f="firstName" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Last Name *</label>
+              <input className={cls('lastName')} value={form.lastName} onChange={set('lastName')} />
+              <Err f="lastName" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Email <span className="text-gray-400">(comma-separate several)</span>
+            </label>
+            <input className={cls('email')} value={form.email} onChange={set('email')} />
+            <Err f="email" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Cell Phone</label>
+              <input className={cls('cellPhone')} value={form.cellPhone} onChange={set('cellPhone')}
+                     placeholder="10 digits" />
+              <Err f="cellPhone" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+              <select className="input-field" value={form.status} onChange={set('status')}>
+                {['Active', 'Inactive', 'Pending'].map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : 'Create & Select'}
+            </button>
+          </div>
+        </form>
+
+        {duplicates.length > 0 && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-2xl z-10">
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4">
+              <div className="flex items-start gap-3 mb-4">
+                <span className="text-2xl">⚠️</span>
+                <div>
+                  <h3 className="font-bold text-gray-800 text-base">Member May Already Exist</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {duplicates.length > 1 ? 'These members' : 'This member'} already{' '}
+                    {duplicates.length > 1 ? 'have' : 'has'} the same name:
+                  </p>
+                </div>
+              </div>
+              <ul className="mb-5 space-y-1">
+                {duplicates.map((d) => (
+                  <li key={d.personId}
+                      className="text-sm bg-yellow-50 border border-yellow-200 rounded px-3 py-2 text-gray-700">
+                    <button type="button" className="text-left w-full"
+                            onClick={() => onCreated(d, false)}>
+                      <strong>{d.firstName} {d.lastName}</strong>
+                      {(d.city || d.state) && (
+                        <span className="text-gray-400 ml-2">
+                          — {[d.city, d.state].filter(Boolean).join(', ')}
+                        </span>
+                      )}
+                      <span className="text-gray-400 ml-2">(ID #{d.personId})</span>
+                      <span className="block text-xs text-bcs-primary mt-0.5">Use this member instead</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-3 justify-end">
+                <button type="button" className="btn-secondary" onClick={() => setDuplicates([])}>Back</button>
+                <button type="button" className="btn-primary" disabled={saving}
+                        onClick={() => doSave(payload())}>
+                  {saving ? 'Saving…' : 'Create Anyway'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 
 // ── Contribution Modal ────────────────────────────────────────────────────────
 
@@ -109,6 +331,11 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
   const [membership, setMembership] = useState(null)
   const [membershipLoading, setMembershipLoading] = useState(false)
 
+  // Name typed into the search box when "add new member" was clicked; non-null
+  // while the quick-add form is open.
+  const [quickAddName, setQuickAddName] = useState(null)
+  const [justCreated, setJustCreated] = useState(null)
+
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }))
 
   const handleMemberSelect = async (m) => {
@@ -131,7 +358,16 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
   const handleMemberSearchChange = (q) => {
     setMemberSearch(q)
     if (membership) setMembership(null)
+    if (justCreated) setJustCreated(null)
     setForm((f) => (f.personId ? { ...f, personId: '' } : f))
+  }
+
+  // The quick-add form hands back the new (or chosen existing) member; from
+  // here it behaves exactly as if it had been picked from the search results.
+  const handleMemberCreated = async (m, isNew) => {
+    setQuickAddName(null)
+    setJustCreated(isNew ? m : null)
+    await handleMemberSelect(m)
   }
 
   // Once the membership event itself is chosen, the dues are being collected
@@ -197,6 +433,7 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
                 value={memberSearch}
                 onChange={handleMemberSearchChange}
                 onSelect={handleMemberSelect}
+                onAddNew={setQuickAddName}
               />
             )}
             {form.personId && (
@@ -204,6 +441,12 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
             )}
 
             {/* Membership dues check */}
+            {justCreated && (
+              <p className="text-xs text-green-700 mt-1">
+                ✓ New member created — add their address and other details on the Members page.
+              </p>
+            )}
+
             {membershipLoading && (
               <p className="text-xs text-gray-400 mt-1">Checking membership…</p>
             )}
@@ -320,6 +563,14 @@ function ContributionModal({ contribution, events, onClose, onSaved }) {
           </div>
         </form>
       </div>
+
+      {quickAddName !== null && (
+        <QuickAddMemberModal
+          typedName={quickAddName}
+          onClose={() => setQuickAddName(null)}
+          onCreated={handleMemberCreated}
+        />
+      )}
     </div>
   )
 }
